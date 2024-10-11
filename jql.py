@@ -15,17 +15,18 @@ cache = dogpile.cache.make_region().configure(
 
 
 def get_auth():
-    token = os.environ.get('JIRA_TOKEN')
+    token = os.environ.get("JIRA_TOKEN")
     if not token:
         raise KeyError("JIRA_TOKEN must be defined to access jira.")
     return token
 
 
 def get_jira():
-    """ Returns a JIRA client object. """
+    """Returns a JIRA client object."""
     token = get_auth()
     jira_config = dict(options=dict(server=JIRA_URL), token_auth=token)
     return jira.client.JIRA(**jira_config)
+
 
 def get(client, key):
     print(f"[JQL] key={key}", file=sys.stderr)
