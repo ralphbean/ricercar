@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+"""🍙 A tool to help manage RICE values in JIRA 🍙 """
 
 import concurrent.futures
 import copy
@@ -11,7 +12,7 @@ import jql
 RICE = ["Reach", "Impact", "Confidence", "Effort"]
 
 
-@click.group()
+@click.group(help=__doc__)
 @click.option(
     "--force", is_flag=True, help="Prompt and set values even if they are already set"
 )
