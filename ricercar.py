@@ -60,6 +60,16 @@ def custom_sort(key):
     return order.index(key)
 
 
+def format_field(key):
+    emojis = {
+        "Reach": "🖐️ ",
+        "Impact": "👊",
+        "Effort": "🥵",
+        "Confidence": "😎",
+    }
+    return f"{emojis.get(key, '')} {key}".strip()
+
+
 def format_issue(issue):
     return f"{issue.permalink().ljust(46)} {issue.fields.summary}"
 
@@ -72,18 +82,18 @@ def process(executor, issue, force, prompts, client, fieldmap):
         value = getattr(issue.fields, fieldmap[field])
         if value is None or force:
             value = click.prompt(
-                f" {field}({value})",
+                f" {format_field(field)}({value})",
                 value_proc=processors[field],
                 default=NULL,
                 show_default=False,
             )
             if value is not NULL:
-                click.echo(f"    Will update {field} on {issue.key} to {value}")
+                click.echo(f"      ✅ Will update {field} on {issue.key} to {value}")
                 updates[fieldmap[field]] = value
             else:
-                click.echo(f"    Skipping {field}")
+                click.echo(f"      ⚪ Skipping {field}")
     if updates:
-        click.echo(f"  Applying updates to {issue.key} in the background: {updates}")
+        click.echo(f" 🌀 Applying updates to {issue.key} in the background: {updates}")
         executor.submit(issue.update, updates)
 
 
