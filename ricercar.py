@@ -108,7 +108,6 @@ def process(executor, issue, force, prompts, client, fieldmap):
         executor.submit(issue.update, updates)
 
 
-
 def process_rice_options(force, reach, impact, confidence, effort):
     prompts = set()
     rice_clauses = set()
@@ -144,9 +143,7 @@ def process_rice_options(force, reach, impact, confidence, effort):
 @click.option("--impact", is_flag=True, help="Focus only on Impact values")
 @click.option("--confidence", is_flag=True, help="Focus only on Confidence values")
 @click.option("--effort", is_flag=True, help="Focus only on Effort values")
-@click.option(
-    "--limit", type=int, default=10, help="Total number of issues to loop through"
-)
+@click.option("--limit", type=int, default=10, help="Total number of issues")
 @click.pass_context
 def workflow(ctx, query, reach, impact, confidence, effort, limit):
     """Iterate over features with missing RICE fields and set them."""
@@ -158,6 +155,7 @@ def workflow(ctx, query, reach, impact, confidence, effort, limit):
     rice_query = " OR ".join(list(clauses))
 
     full_query = f"({rice_query}) and {query}"
+
     issues = jql.search(client, full_query, limit=limit)
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         for issue in issues:
@@ -187,9 +185,7 @@ def set_jira(ctx, key):
     "--confidence", is_flag=True, help="List only issues without Confidence values"
 )
 @click.option("--effort", is_flag=True, help="List only issues without Effort values")
-@click.option(
-    "--limit", type=int, default=10, help="Total number of issues to loop through"
-)
+@click.option("--limit", type=int, default=10, help="Total number of issues")
 def list_jira(query, reach, impact, confidence, effort, limit):
     """List features with missing RICE fields."""
     client = jql.get_jira()
@@ -205,9 +201,7 @@ def list_jira(query, reach, impact, confidence, effort, limit):
 
 @cli.command("diff")
 @click.option("--query", required=True, help="JIRA query to compare order")
-@click.option(
-    "--limit", type=int, default=10, help="Total number of issues to loop through"
-)
+@click.option("--limit", type=int, default=10, help="Total number of issues")
 def diff(query, limit):
     """Generate a diff of a query sorted by Rank vs RICE."""
     client = jql.get_jira()
