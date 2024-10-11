@@ -31,7 +31,14 @@ class NULL(Exception):
 def float_or_null(x):
     if x is NULL:
         return x
-    return float(x)
+    error = f"{x} must be a number greater than 0 and less than or equal to 5"
+    try:
+        value = float(x)
+    except ValueError:
+        raise click.UsageError(error)
+    if value <= 0 or value > 5:
+        raise click.UsageError(error)
+    return value
 
 
 def confidence_processor(x):
@@ -43,7 +50,10 @@ def confidence_processor(x):
         "75": {"value": "75% (Medium)", "id": "27778"},
         "100": {"value": "100% (High)", "id": "27777"},
     }
-    return lookup[x]
+    try:
+        return lookup[x]
+    except KeyError:
+        raise click.UsageError(f"{x} must be one of {lookup.keys()}")
 
 
 processors = {
