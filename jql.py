@@ -32,6 +32,6 @@ def get(client, key):
     return client.issue(key)
 
 
-def search(client, jql):
+def search(client, jql, limit):
     print(f"[JQL] {jql}", file=sys.stderr)
-    return client.search_issues(jql, maxResults=10)
+    return client.search_issues(jql, maxResults=limit)
