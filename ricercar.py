@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import concurrent.futures
 import copy
 import difflib
 
@@ -63,8 +64,9 @@ def format_issue(issue):
     return f"{issue.permalink().ljust(46)} {issue.fields.summary}"
 
 
-def process(issue, force, prompts, client, fieldmap):
-    click.echo(format_issue(issue))
+def process(executor, issue, force, prompts, client, fieldmap):
+    separator = "─" * 80
+    click.echo(f"{separator}\n{format_issue(issue)}")
     updates = {}
     for field in sorted(prompts, key=custom_sort):
         value = getattr(issue.fields, fieldmap[field])
@@ -81,8 +83,9 @@ def process(issue, force, prompts, client, fieldmap):
             else:
                 click.echo(f"    Skipping {field}")
     if updates:
-        click.echo(f"    Applying updates to {issue.key}: {updates}")
-        issue.update(updates)
+        click.echo(f"  Applying updates to {issue.key} in the background: {updates}")
+        executor.submit(issue.update, updates)
+
 
 
 def process_rice_options(force, reach, impact, confidence, effort):
@@ -135,8 +138,9 @@ def workflow(ctx, query, reach, impact, confidence, effort, limit):
 
     full_query = f"({rice_query}) and {query}"
     issues = jql.search(client, full_query, limit=limit)
-    for issue in issues:
-        process(issue, force, prompts, client, fieldmap)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        for issue in issues:
+            process(executor, issue, force, prompts, client, fieldmap)
     click.echo("Done")
 
 
@@ -149,7 +153,8 @@ def set_jira(ctx, key):
     client = jql.get_jira()
     fieldmap = dict([(f["name"], f["id"]) for f in client.fields()])
     issue = jql.get(client, key)
-    process(issue, force, RICE, client, fieldmap)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        process(executor, issue, force, RICE, client, fieldmap)
     click.echo("Done")
 
 
