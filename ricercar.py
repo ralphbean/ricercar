@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import copy
+import difflib
 
 import click
 
@@ -58,9 +59,11 @@ def custom_sort(key):
     order = ["Reach", "Impact", "Effort", "Confidence"]
     return order.index(key)
 
+def format_issue(issue):
+    return f"{issue.permalink().ljust(46)} {issue.fields.summary}"
 
 def process(issue, force, prompts, client, fieldmap):
-    click.echo(f"{issue.permalink().ljust(46)} {issue.fields.summary}")
+    click.echo(format_issue(issue))
     updates = {}
     for field in sorted(prompts, key=custom_sort):
         value = getattr(issue.fields, fieldmap[field])
@@ -75,7 +78,7 @@ def process(issue, force, prompts, client, fieldmap):
         click.echo(f"    Applying updates to {issue.key}: {updates}")
         issue.update(updates)
 
-   
+
 def process_rice_options(force, reach, impact, confidence, effort):
     prompts = set()
     rice_clauses = set()
@@ -113,7 +116,7 @@ def process_rice_options(force, reach, impact, confidence, effort):
 @click.option('--effort', is_flag=True, help="Focus only on Effort values")
 @click.option('--limit', type=int, default=10, help="Total number of issues to loop through")
 @click.pass_context
-def burndown(ctx, query, reach, impact, confidence, effort, limit):
+def workflow(ctx, query, reach, impact, confidence, effort, limit):
     """ Iterate over features with missing RICE fields and set them. """
     force = ctx.obj['force']
     client = jql.get_jira()
@@ -121,7 +124,7 @@ def burndown(ctx, query, reach, impact, confidence, effort, limit):
 
     prompts, clauses = process_rice_options(force, reach, impact, confidence, effort)
     rice_query = " OR ".join(list(clauses))
-        
+
     full_query = f"({rice_query}) and {query}"
     issues = jql.search(client, full_query, limit=limit)
     for issue in issues:
@@ -140,6 +143,53 @@ def set_jira(ctx, key):
     issue = jql.get(client, key)
     process(issue, force, RICE, client, fieldmap)
     click.echo("Done")
+
+
+@cli.command('list')
+@click.option('--query', required=True, help="JIRA query to list")
+@click.option('--reach', is_flag=True, help="List only issues without Reach values")
+@click.option('--impact', is_flag=True, help="List only issues without Impact values")
+@click.option('--confidence', is_flag=True, help="List only issues without Confidence values")
+@click.option('--effort', is_flag=True, help="List only issues without Effort values")
+@click.option('--limit', type=int, default=10, help="Total number of issues to loop through")
+def list_jira(query, reach, impact, confidence, effort, limit):
+    """ List features with missing RICE fields. """
+    client = jql.get_jira()
+
+    prompts, clauses = process_rice_options(False, reach, impact, confidence, effort)
+    rice_query = " OR ".join(list(clauses))
+
+    full_query = f"({rice_query}) and {query}"
+    issues = jql.search(client, full_query, limit=limit)
+    for issue in issues:
+        click.echo(format_issue(issue))
+
+
+@cli.command('diff')
+@click.option('--query', required=True, help="JIRA query to compare order")
+@click.option('--limit', type=int, default=10, help="Total number of issues to loop through")
+def diff(query, limit):
+    """ Generate a diff of a query sorted by Rank vs RICE. """
+    client = jql.get_jira()
+    fieldmap = dict([(f['name'], f['id']) for f in client.fields()])
+
+    if 'ORDER BY' in query.upper():
+        raise click.BadOptionUsage("query", "Query may not contain 'ORDER BY'")
+
+    by_rank = "ORDER BY Rank"
+    by_rice = "ORDER BY 'RICE Score' DESC"
+    src = [f"{format_issue(i)}\n" for i in jql.search(client, f"{query} {by_rank}", limit=limit)]
+    dst = [f"{format_issue(i)}\n" for i in jql.search(client, f"{query} and 'RICE Score' is not EMPTY {by_rice}", limit=limit)]
+
+    click.echo("SRC")
+    for line in src:
+        click.echo(line.strip('\n'))
+    click.echo("DST")
+    for line in dst:
+        click.echo(line.strip('\n'))
+
+    for line in difflib.unified_diff(src, dst, fromfile=by_rank, tofile=by_rice):
+        click.echo(line.strip('\n'))
 
 
 if __name__ == '__main__':
