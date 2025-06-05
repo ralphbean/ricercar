@@ -9,7 +9,7 @@ import click
 
 import jql
 
-RICE = ["Reach", "Impact", "Confidence", "Effort"]
+RICE = ["Reach", "Impact", "Confidence", "Effort", "Parent Link"]
 
 
 @click.group(help=__doc__)
@@ -41,6 +41,20 @@ def float_or_null(x):
     return value
 
 
+def jira_outcome_processor(x):
+    if x is NULL:
+        return x
+    lookup = {
+        "1": "KONFLUX-6116",
+        "2": "KONFLUX-6117",
+        "3": "KONFLUX-6118",
+    }
+    try:
+        return lookup[x]
+    except KeyError:
+        raise click.UsageError(f"{x} must be one of {lookup.keys()}")
+
+
 def confidence_processor(x):
     if x is NULL:
         return x
@@ -61,24 +75,34 @@ processors = {
     "Impact": float_or_null,
     "Confidence": confidence_processor,
     "Effort": float_or_null,
+    "Parent Link": jira_outcome_processor,
 }
 
 
 def custom_sort(key):
     # Put Confidence last, because you only want to specify confidence after
     # you've specified the others.
-    order = ["Reach", "Impact", "Effort", "Confidence"]
+    order = ["Parent Link", "Reach", "Impact", "Effort", "Confidence"]
     return order.index(key)
 
 
 def format_field(key):
     emojis = {
+        "Parent Link": "⬆️ ",
         "Reach": "🖐️ ",
         "Impact": "👊",
         "Effort": "🥵",
         "Confidence": "😎",
     }
     return f"{emojis.get(key, '')} {key}".strip()
+
+
+def empty(field, value):
+    if field == 'Parent Link':
+        # Hardcoded :( It would be better to check the statusCategory of the value but that's an extra call to JIRA.
+        return value is None or value not in ["KONFLUX-6116", "KONFLUX-6117", "KONFLUX-6118"]
+    else:
+        return value is None
 
 
 def format_issue(issue):
@@ -91,7 +115,7 @@ def process(executor, issue, force, prompts, client, fieldmap):
     updates = {}
     for field in sorted(prompts, key=custom_sort):
         value = getattr(issue.fields, fieldmap[field])
-        if value is None or force:
+        if empty(field, value) or force:
             value = click.prompt(
                 f" {format_field(field)}({value})",
                 value_proc=processors[field],
@@ -108,7 +132,7 @@ def process(executor, issue, force, prompts, client, fieldmap):
         executor.submit(issue.update, updates)
 
 
-def process_rice_options(force, reach, impact, confidence, effort):
+def process_rice_options(force, reach, impact, confidence, effort, outcome):
     prompts = set()
     rice_clauses = set()
     if reach:
@@ -127,38 +151,50 @@ def process_rice_options(force, reach, impact, confidence, effort):
         rice_clauses.add("Effort is EMPTY")
         prompts.add("Effort")
 
-    if not reach and not impact and not confidence and not effort:
+    if outcome:
+        rice_clauses.add("('Parent Link' is EMPTY or issueFunction in portfolioChildrenOf('statusCategory = Done and type=Outcome'))")
+        prompts.add("Parent Link")
+
+    if not reach and not impact and not confidence and not effort and not outcome:
         rice_clauses.add("Reach is EMPTY")
         rice_clauses.add("Impact is EMPTY")
         rice_clauses.add("Confidence is EMPTY")
         rice_clauses.add("Effort is EMPTY")
-        prompts = set(["Reach", "Impact", "Confidence", "Effort"])
+        #rice_clauses.add("('Parent Link' is EMPTY or issueFunction in portfolioChildrenOf('statusCategory = Done and type=Outcome'))")
+        prompts = set(["Reach", "Impact", "Confidence", "Effort"])  # , "Parent Link"])
 
     return prompts, rice_clauses
 
 
 @cli.command()
 @click.option("--query", required=True, help="JIRA query to burn through")
+@click.option("--ignore", help="Comman-separated list of jiras to ignore")
 @click.option("--reach", is_flag=True, help="Focus only on Reach values")
 @click.option("--impact", is_flag=True, help="Focus only on Impact values")
 @click.option("--confidence", is_flag=True, help="Focus only on Confidence values")
 @click.option("--effort", is_flag=True, help="Focus only on Effort values")
+@click.option("--outcome", is_flag=True, help="Focus only on Parent Link")
 @click.option("--limit", type=int, default=10, help="Total number of issues")
 @click.pass_context
-def workflow(ctx, query, reach, impact, confidence, effort, limit):
+def workflow(ctx, query, ignore, reach, impact, confidence, effort, outcome, limit):
     """Iterate over features with missing RICE fields and set them."""
     force = ctx.obj["force"]
     client = jql.get_jira()
     fieldmap = dict([(f["name"], f["id"]) for f in client.fields()])
 
-    prompts, clauses = process_rice_options(force, reach, impact, confidence, effort)
+    if ignore:
+        exclusions = f"key not in ({ignore})"
+        query = f"{exclusions} and {query}"
+
+    prompts, clauses = process_rice_options(force, reach, impact, confidence, effort, outcome)
     rice_query = " OR ".join(list(clauses))
 
     full_query = f"({rice_query}) and {query}"
 
     issues = jql.search(client, full_query, limit=limit)
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        for issue in issues:
+        for i, issue in enumerate(issues):
+            click.echo(f"Issue {i} of {len(issues)}")
             process(executor, issue, force, prompts, client, fieldmap)
     click.echo("Done")
 
@@ -179,18 +215,24 @@ def set_jira(ctx, key):
 
 @cli.command("list")
 @click.option("--query", required=True, help="JIRA query to list")
+@click.option("--ignore", help="Comman-separated list of jiras to ignore")
 @click.option("--reach", is_flag=True, help="List only issues without Reach values")
 @click.option("--impact", is_flag=True, help="List only issues without Impact values")
 @click.option(
     "--confidence", is_flag=True, help="List only issues without Confidence values"
 )
 @click.option("--effort", is_flag=True, help="List only issues without Effort values")
+@click.option("--outcome", is_flag=True, help="Focus only on Parent Link")
 @click.option("--limit", type=int, default=10, help="Total number of issues")
-def list_jira(query, reach, impact, confidence, effort, limit):
+def list_jira(query, ignore, reach, impact, confidence, effort, outcome, limit):
     """List features with missing RICE fields."""
     client = jql.get_jira()
 
-    prompts, clauses = process_rice_options(False, reach, impact, confidence, effort)
+    if ignore:
+        exclusions = f"key not in ({ignore})"
+        query = f"{exclusions} and {query}"
+
+    prompts, clauses = process_rice_options(False, reach, impact, confidence, effort, outcome)
     rice_query = " OR ".join(list(clauses))
 
     full_query = f"({rice_query}) and {query}"
@@ -201,11 +243,16 @@ def list_jira(query, reach, impact, confidence, effort, limit):
 
 @cli.command("diff")
 @click.option("--query", required=True, help="JIRA query to compare order")
+@click.option("--ignore", help="Comman-separated list of jiras to ignore")
 @click.option("--limit", type=int, default=10, help="Total number of issues")
-def diff(query, limit):
+def diff(query, ignore, limit):
     """Generate a diff of a query sorted by Rank vs RICE."""
     client = jql.get_jira()
     fieldmap = dict([(f["name"], f["id"]) for f in client.fields()])
+
+    if ignore:
+        exclusions = f"key not in ({ignore})"
+        query = f"{exclusions} and {query}"
 
     if "ORDER BY" in query.upper():
         raise click.BadOptionUsage("query", "Query may not contain 'ORDER BY'")
